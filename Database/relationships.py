@@ -186,17 +186,21 @@ class FriendRequestsManager:
     def accept_request(self, sender_id):
         user1_id = min(self.user_id, sender_id)
         user2_id = max(self.user_id, sender_id)
-        
+
         conn, cursor = self.cache.app.get_cursor()
         try:
             cursor.execute("""
-                INSERT INTO friends (user1_id, user2_id) 
+                INSERT INTO friends (user1_id, user2_id)
                 VALUES (%s, %s)
             """, (user1_id, user2_id))
-            
-            self.reject_request(sender_id)
+
+            cursor.execute("""
+                DELETE FROM friends_requests
+                WHERE sender_id = %s AND receiver_id = %s
+            """, (sender_id, self.user_id))
+
             return self
-        finally: 
+        finally:
             cursor.close()
             conn.close()
     

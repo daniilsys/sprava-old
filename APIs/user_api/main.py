@@ -399,6 +399,7 @@ class UserAPI:
                 "status_code": 200,
                 "friend_requests_ids": relationship.get_received_requests()
             }
+        
     def get_sent_friend_requests(self):
         @self.app.get("/me/sent_friend_requests", tags=["Friends Requests"], description="Retrieve a list of your sent friend request IDs.")
         def root(authorization: str = Header(None)):
