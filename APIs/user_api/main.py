@@ -572,6 +572,12 @@ class UserAPI:
                     "message": "The given user_id is not related to any users."
                 }
 
+            if data.friend_id in relationship_blocked.get_blocked_users():
+                return {
+                    "status_code": 409,
+                    "message": "User is already blocked."
+                }
+
             relationship_blocked.block_user(data.friend_id)
 
             return {
