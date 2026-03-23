@@ -40,7 +40,7 @@ MediaAPI(fastapi_app)
 websocket_routes = WebsocketRoutes(fastapi_app)
 fastapi_app.websocket_manager = websocket_routes.manager
 
-app = socketio.ASGIApp(sio, other_app=fastapi_app)
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
 
 if __name__ == "__main__":
     import uvicorn
