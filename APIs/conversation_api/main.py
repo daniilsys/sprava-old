@@ -36,11 +36,11 @@ class ConversationsAPI:
     def __get_user_from_token(self, authorization):
         if not authorization:
             raise HTTPException(status_code=401, detail="No authorization header given")
-        
+
         user = self.app.users_cache.get_user_by_token(authorization)
-        if not user: 
+        if not user:
             raise HTTPException(status_code=401, detail="No user found with this token")
-        
+
         return user
 
     def create_conversation(self):
@@ -48,7 +48,7 @@ class ConversationsAPI:
                        description="Create a new conversation with a friend.")
         async def root(data: ConversationCreationDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             if data.user2_id not in self.app.users_cache.cache:
                 return {
                     "status_code":  404,
@@ -59,17 +59,16 @@ class ConversationsAPI:
                     "status_code": 403,
                     "message": "You can only create conversations with your friends."
                 }
-            
+
             if self.app.relationships_cache.are_blocked(user.user_id, data.user2_id):
                 return {
                     "status_code": 403,
                     "message": "You cannot create conversations with users you have blocked or who have blocked you."
                 }
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             conversation_id = conversation_manager.get_or_create_conversation(data.user2_id)
-            await self.app.websocket_managers.send_personal_message(data.user2_id, {
-                "type": "new_conversation",
+            await self.app.websocket_manager.emit_to_user(data.user2_id, "new_conversation", {
                 "conversation_id": conversation_id,
                 "other_user_id": user.user_id
             })
@@ -79,15 +78,16 @@ class ConversationsAPI:
             }
 
     def delete_conversation(self):
-        @self.app.delete("/delete_conversation", tags=["Conversations"], 
+        @self.app.delete("/delete_conversation", tags=["Conversations"],
                         description="Delete a conversation.")
         async def root(data: ConversationRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
+            other_user_id = conversation_manager.get_other_user_id(data.conversation_id)
             conversation_manager.delete_conversation(data.conversation_id)
-            await self.app.websocket_managers.send_personal_message(data.conversation_id, {
-                "type": "conversation_deleted",
+
+            await self.app.websocket_manager.emit_to_user(other_user_id, "conversation_deleted", {
                 "conversation_id": data.conversation_id
             })
             return {
@@ -100,7 +100,7 @@ class ConversationsAPI:
                       description="Retrieve a list of your conversations with informations about it, such as last message, unread messages, etc.")
         def root(authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             conversations = conversation_manager.get_conversations()
             return {
@@ -109,14 +109,14 @@ class ConversationsAPI:
             }
 
     def get_conversation_messages(self):
-        @self.app.get("/conversation/messages", tags=["Conversations"], 
+        @self.app.get("/conversation/messages", tags=["Conversations"],
                       description="Retrieve messages from a specific conversation.")
         def root(conversation_id: int, limit: int = 50, offset:  int = 0, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             messages = conversation_manager.get_messages(conversation_id, limit, offset)
-            
+
             return {
                 "status_code": 200,
                 "messages": messages
@@ -129,7 +129,7 @@ class ConversationsAPI:
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             other_user_id = conversation_manager.get_other_user_id(data.conversation_id)
 
-            if self.app.relationships_cache.are_blocked(user.user_id, data.conversation_id):
+            if self.app.relationships_cache.are_blocked(user.user_id, other_user_id):
                 return {
                     "status_code": 403,
                     "message": "You cannot send messages in conversations with users you have blocked or who have blocked you."
@@ -137,15 +137,17 @@ class ConversationsAPI:
 
             message_id = conversation_manager.send_message(data.conversation_id, data.content)
 
-            await self.app.websocket_managers.send_personal_message(other_user_id, {
-                "type": "new_message",
+            message_data = {
                 "conversation_id": data.conversation_id,
                 "message_id": message_id,
                 "sender_id": user.user_id,
                 "content": data.content,
                 "created_at": datetime.now().isoformat(),
                 "media_ids": []
-            })
+            }
+
+            await self.app.websocket_manager.emit_to_user(other_user_id, "new_message", message_data)
+            await self.app.websocket_manager.emit_to_user(user.user_id, "new_message", message_data)
 
             return {
                 "status_code": 200,
@@ -158,7 +160,7 @@ class ConversationsAPI:
         @self.app.delete("/conversation/delete_message", tags=["Conversations"], description="Delete a message you have sent in a conversation.")
         async def root(data: ConversationMessageDeleteDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             sender_id = conversation_manager.get_sender_id(data.message_id)
             if sender_id != user.user_id:
@@ -166,7 +168,7 @@ class ConversationsAPI:
                     "status_code": 403,
                     "message": "You can only delete your own messages."
                 }
-            
+
             conversation_id = conversation_manager.get_conversation_id_from_message_id(data.message_id)
 
             if not conversation_id:
@@ -175,8 +177,11 @@ class ConversationsAPI:
                     "message": "Message not found in any of your conversations."
                 }
             conversation_manager.delete_message(data.message_id)
-            await self.app.websocket_managers.send_personal_message(conversation_manager.get_other_user_id(conversation_id), {
-                "type": "delete_message",
+            other_user_id = conversation_manager.get_other_user_id(conversation_id)
+            await self.app.websocket_manager.emit_to_user(other_user_id, "delete_message", {
+                "message_id": data.message_id
+                })
+            await self.app.websocket_manager.emit_to_user(user.user_id, "delete_message", {
                 "message_id": data.message_id
                 })
             return {
@@ -189,12 +194,11 @@ class ConversationsAPI:
         @self.app.put("/conversation/read", tags=["Conversations"], description="Mark messages as read in a specific conversation.")
         async def root(data: ConversationRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
-            
+
             conversation_manager = self.app.conversations_cache.cache[user.user_id]
             conversation_manager.mark_as_read(data.conversation_id)
 
-            await self.app.websocket_managers.send_personal_message(conversation_manager.get_other_user_id(data.conversation_id), {
-                "type": "messages_read",
+            await self.app.websocket_manager.emit_to_user(conversation_manager.get_other_user_id(data.conversation_id), "messages_read", {
                 "conversation_id": data.conversation_id,
             })
             return {

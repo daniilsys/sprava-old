@@ -1,3 +1,4 @@
+import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .auth_api.main import AuthAPI
@@ -10,10 +11,11 @@ from Database.conversations import ConversationsCache
 from .media_api.main import MediaAPI
 from Database.media import MediaDatabase
 from Websocket.websocket_routes import WebsocketRoutes
-from Database.pool import pool, get_cursor 
+from Websocket.websocket_manager import sio
+from Database.pool import pool, get_cursor
 
-app = FastAPI()
-app.add_middleware(
+fastapi_app = FastAPI()
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://sprava.top", "https://app.sprava.top", "http://localhost:3000"],
     allow_credentials=True,
@@ -21,22 +23,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.db_pool = pool
-app.get_cursor = get_cursor
+fastapi_app.db_pool = pool
+fastapi_app.get_cursor = get_cursor
 
-app.users_cache = UsersCache(app).init_table()
-app.users_profile_cache = UsersProfileCache(app).init_table()
-app.relationships_cache = RelationshipsCache(app).init_table()
-app.conversations_cache = ConversationsCache(app).init_table()
-app.medias = MediaDatabase(app).init_table()
+fastapi_app.users_cache = UsersCache(fastapi_app).init_table()
+fastapi_app.users_profile_cache = UsersProfileCache(fastapi_app).init_table()
+fastapi_app.relationships_cache = RelationshipsCache(fastapi_app).init_table()
+fastapi_app.conversations_cache = ConversationsCache(fastapi_app).init_table()
+fastapi_app.medias = MediaDatabase(fastapi_app).init_table()
 
 
-AuthAPI(app)
-UserAPI(app)
-ConversationsAPI(app)
-MediaAPI(app)
-websocket_routes = WebsocketRoutes(app)
-app.websocket_managers = websocket_routes.manager
-if __name__ == "__main__": 
+AuthAPI(fastapi_app)
+UserAPI(fastapi_app)
+ConversationsAPI(fastapi_app)
+MediaAPI(fastapi_app)
+websocket_routes = WebsocketRoutes(fastapi_app)
+fastapi_app.websocket_manager = websocket_routes.manager
+
+app = socketio.ASGIApp(sio, other_app=fastapi_app)
+
+if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

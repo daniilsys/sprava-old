@@ -1,6 +1,4 @@
-from fastapi import WebSocket
-from starlette.websockets import WebSocketDisconnect
-from Websocket.websocket_manager import ConnectionManager
+from Websocket.websocket_manager import ConnectionManager, sio
 from Websocket.websocket_handlers import WebSocketHandlers
 
 
@@ -9,34 +7,47 @@ class WebsocketRoutes:
         self.app = app
         self.manager = ConnectionManager()
         self.handlers = WebSocketHandlers(app, self.manager)
-        self.setup_routes()
+        self.setup_events()
 
-    def setup_routes(self):
-        @self.app.websocket("/ws/{api_token}")
-        async def root(websocket: WebSocket, api_token: str):
-            await self.handle_connection(websocket, api_token)
+    def setup_events(self):
+        @sio.event
+        async def connect(sid, environ, auth):
+            if not auth or "token" not in auth:
+                raise ConnectionRefusedError("No token provided")
 
-    async def handle_connection(self, websocket: WebSocket, api_token: str):
-        user = self.app.users_cache.get_user_by_token(api_token)
+            token = auth["token"]
+            user = self.app.users_cache.get_user_by_token(token)
 
-        if not user:
-            await websocket.close(code=4008)
-            return
+            if not user:
+                raise ConnectionRefusedError("Invalid token")
 
-        user_id = user.user_id
-        await self.manager.connect(websocket, user_id)
+            user_id = user.user_id
+            self.manager.register(sid, user_id)
 
-        await self.handlers.notify_status_change(user_id, "online")
+            await self.handlers.notify_status_change(user_id, "online")
 
-        try:
-            while True:
-                data = await websocket.receive_json()
-                await self.handlers.handle_message(data, user_id)
+        @sio.event
+        async def disconnect(sid):
+            user_id = self.manager.unregister(sid)
+            if user_id and not self.manager.is_user_online(user_id):
+                await self.handlers.notify_status_change(user_id, "offline")
 
-        except WebSocketDisconnect:
-            self.manager.disconnect(websocket, user_id)
-            await self.handlers.notify_status_change(user_id, "offline")
+        @sio.event
+        async def send_message(sid, data):
+            await self.handlers.handle_send_message(sid, data)
 
-        except Exception as e:
-            self.manager.disconnect(websocket, user_id)
-            await self.handlers.notify_status_change(user_id, "offline")
+        @sio.event
+        async def typing(sid, data):
+            await self.handlers.handle_typing(sid, data)
+
+        @sio.event
+        async def stop_typing(sid, data):
+            await self.handlers.handle_stop_typing(sid, data)
+
+        @sio.event
+        async def mark_read(sid, data):
+            await self.handlers.handle_mark_read(sid, data)
+
+        @sio.event
+        async def get_online_friends(sid, data):
+            await self.handlers.handle_get_online_friends(sid, data)

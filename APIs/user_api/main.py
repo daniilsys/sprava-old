@@ -50,7 +50,7 @@ class UserAPI:
         self.get_me()
         self.get_user_batch()
         self.get_user_from_username()
-        
+
         self.change_username()
         self.change_password()
         self.change_date_of_birth()
@@ -78,14 +78,30 @@ class UserAPI:
     def __get_user_from_token(self, authorization):
         if not authorization:
             raise HTTPException(status_code=401, detail="No authorization header given")
-        
+
         user = self.app.users_cache.get_user_by_token(authorization)
-        if not user: 
+        if not user:
             raise HTTPException(status_code=401, detail="No user found with this token")
-        
+
         return user
-    
-    
+
+    def _can_see(self, visibility, are_friends):
+        if visibility == "everyone":
+            return True
+        if visibility == "friends" and are_friends:
+            return True
+        return False
+
+    async def _notify_friends_user_updated(self, user):
+        """Notify all online friends that a user's profile info changed."""
+        user_id = user.user_id
+        friends = self.app.relationships_cache.cache[user_id]["friends"].get_friends()
+        data = {
+            "user_id": user_id,
+            "username": user.get("username"),
+            "avatar_id": user.get("avatar_id"),
+        }
+        await self.app.websocket_manager.emit_to_multiple(friends, "user_updated", data)
 
     def get_me(self):
         @self.app.get("/me", tags=["User Info"], description="Retrieve your user information.")
@@ -101,12 +117,12 @@ class UserAPI:
                 "date_of_birth": user.get("date_of_birth"),
                 "avatar_id": user.get("avatar_id")
             }
-    
+
     def get_user(self):
         @self.app.get("/user", tags=["User Info"], description="Retrieve user information by user ID.")
         def root(user_id:  int, authorization: str = Header(None)):
             self.__get_user_from_token(authorization)
-            
+
             if user_id not in self.app.users_cache.cache:
                 return {
                     "status_code": 404,
@@ -125,7 +141,7 @@ class UserAPI:
                 "date_of_birth": user.get("date_of_birth") if (is_self or self._can_see(user_profile.get("share_date_of_birth"), are_friends)) else None,
                 "avatar_id": user.get("avatar_id")
             }
-        
+
     def get_user_from_username(self):
         @self.app.get("/user/username", tags=["User Info"], description="Retrieve user information by username.")
         def root(username: str, authorization: str = Header(None)):
@@ -176,7 +192,7 @@ class UserAPI:
                 "status_code":  200,
                 "users":  users_info
             }
-    
+
     def get_user_profile(self):
         @self.app.get("/user/profile", tags=["User Profile"], description="Retrieve user profile information by user ID.")
         def root(user_id: int, authorization: str = Header(None)):
@@ -210,7 +226,7 @@ class UserAPI:
                 "mail": user.get("mail") if (is_self or self._can_see(share_mail, are_friends)) else None,
                 "date_of_birth": user.get("date_of_birth") if (is_self or self._can_see(share_dob, are_friends)) else None,
             }
-    
+
     def get_me_profile(self):
         @self.app.get("/me/profile", tags=["User Profile"], description="Retrieve your user profile information.")
         def root(authorization: str = Header(None)):
@@ -228,16 +244,19 @@ class UserAPI:
                 "share_phone": profile.get("share_phone") or "nobody",
                 "share_date_of_birth": profile.get("share_date_of_birth") or "nobody"
             }
-            
+
 
     def change_username(self):
         @self.app.post("/me/change_username", tags=["User Info"], description="Change your username.")
-        def root(data: UserUpdateDatas, authorization: str = Header(None)):
+        async def root(data: UserUpdateDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
             username = data.username
 
             user.set("username", username)
             user.save()
+
+            await self._notify_friends_user_updated(user)
+
             return {
                 "status_code": 200,
                 "message": "Username updated.",
@@ -259,7 +278,7 @@ class UserAPI:
                 "message": "Password updated.",
                 "user_id": user.user_id
             }
-        
+
     def change_date_of_birth(self):
         @self.app.post("/me/change_date_of_birth", tags=["User Info"], description="Change your date of birth.")
         def root(data: UserUpdateDatas, authorization: str = Header(None)):
@@ -273,7 +292,7 @@ class UserAPI:
                 "user_id": user.user_id,
                 "new_date_of_birth": date_of_birth
             }
-        
+
     def change_mail(self):
         @self.app.post("/me/change_mail", tags=["User Info"], description="Change your email address.")
         def root(data: UserUpdateDatas, authorization: str = Header(None)):
@@ -287,7 +306,7 @@ class UserAPI:
                 "user_id": user.user_id,
                 "new_mail": mail
             }
-        
+
     def change_avatar(self):
         @self.app.post("/me/change_avatar", tags=["User Info"], description="Change your avatar.")
         async def root(file: UploadFile = File(...), authorization: str = Header(None)):
@@ -298,7 +317,7 @@ class UserAPI:
                     "status_code": 400,
                     "message": "Invalid file type. Only .jpg, .jpeg, .png, .gif are allowed."
                 }
-            
+
             contents = await file.read()
             file_size = len(contents) / (1024 * 1024)
             if file_size > 5:
@@ -313,13 +332,15 @@ class UserAPI:
             user.set("avatar_id", f"{id}{ext}")
             user.save()
 
+            await self._notify_friends_user_updated(user)
+
             return {
                 "status_code": 200,
                 "message": "Avatar updated.",
                 "user_id": user.user_id,
                 "avatar_id": id
             }
-    
+
     def update_user_profile(self):
         @self.app.post("/me/update_profile", tags=["User Profile"], description="Update your user profile.")
         def root(data: UserProfileUpdateDatas, authorization: str = Header(None)):
@@ -362,7 +383,7 @@ class UserAPI:
 
     def remove_friend(self):
         @self.app.delete("/me/remove_friend", tags=["Friends"], description="Remove a friend from your friends list.")
-        def root(data: FriendRequestDatas, authorization: str = Header(None)):
+        async def root(data: FriendRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
 
             relationship = self.app.relationships_cache.cache[user.user_id]["friends"]
@@ -374,13 +395,18 @@ class UserAPI:
                 }
 
             friends = relationship.get_friends()
-            if data.friend_id not in friends: 
+            if data.friend_id not in friends:
                 return {
                     "status_code": 404,
                     "message": "You are not friends with this user."
                 }
 
             relationship.remove_friend(data.friend_id)
+
+            await self.app.websocket_manager.emit_to_user(data.friend_id, "friend_removed", {
+                "user_id": user.user_id,
+                "username": user.get("username"),
+            })
 
             return {
                 "status_code": 200,
@@ -399,7 +425,7 @@ class UserAPI:
                 "status_code": 200,
                 "friend_requests_ids": relationship.get_received_requests()
             }
-        
+
     def get_sent_friend_requests(self):
         @self.app.get("/me/sent_friend_requests", tags=["Friends Requests"], description="Retrieve a list of your sent friend request IDs.")
         def root(authorization: str = Header(None)):
@@ -410,7 +436,7 @@ class UserAPI:
                 "status_code": 200,
                 "sent_friend_requests_ids": relationship.get_sent_requests()
             }
-        
+
 
     def send_friend_request(self):
         @self.app.post("/me/send_friend_request", tags=["Friends Requests"], description="Send a friend request to another user.")
@@ -446,8 +472,7 @@ class UserAPI:
 
             relationship.send_request(data.receiver_id)
 
-            await self.app.websocket_managers.send_personal_message(data.receiver_id, {
-                "type": "new_friend_request",
+            await self.app.websocket_manager.emit_to_user(data.receiver_id, "new_friend_request", {
                 "sender_id": user.user_id,
                 "sender_username": user.get("username")
             })
@@ -461,7 +486,7 @@ class UserAPI:
 
     def cancel_friend_request(self):
         @self.app.delete("/me/cancel_friend_request", tags=["Friends Requests"], description="Cancel a sent friend request.")
-        def root(data: FriendRequestDatas, authorization: str = Header(None)):
+        async def root(data: FriendRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
 
             relationship = self.app.relationships_cache.cache[user.user_id]["requests"]
@@ -480,6 +505,10 @@ class UserAPI:
 
             relationship.cancel_request(data.receiver_id)
 
+            await self.app.websocket_manager.emit_to_user(data.receiver_id, "friend_request_canceled", {
+                "sender_id": user.user_id,
+            })
+
             return {
                 "status_code": 200,
                 "message": "Friend request canceled.",
@@ -493,7 +522,7 @@ class UserAPI:
             user = self.__get_user_from_token(authorization)
 
             relationship_requests = self.app.relationships_cache.cache[user.user_id]["requests"]
-            
+
             if data.sender_id not in self.app.users_cache.cache:
                 return {
                     "status_code":  404,
@@ -507,8 +536,7 @@ class UserAPI:
                 }
 
             relationship_requests.accept_request(data.sender_id)
-            await self.app.websocket_managers.send_personal_message(data.sender_id, {
-                "type": "friend_request_accepted",
+            await self.app.websocket_manager.emit_to_user(data.sender_id, "friend_request_accepted", {
                 "friend_id": user.user_id,
                 "friend_username": user.get("username")
             })
@@ -522,7 +550,7 @@ class UserAPI:
 
     def reject_friend_request(self):
         @self.app.delete("/me/reject_friend_request", tags=["Friends Requests"], description="Reject a received friend request.")
-        def root(data: FriendRequestDatas, authorization:  str = Header(None)):
+        async def root(data: FriendRequestDatas, authorization:  str = Header(None)):
             user = self.__get_user_from_token(authorization)
 
             relationship_requests = self.app.relationships_cache.cache[user.user_id]["requests"]
@@ -540,6 +568,11 @@ class UserAPI:
                 }
 
             relationship_requests.reject_request(data.sender_id)
+
+            await self.app.websocket_manager.emit_to_user(data.sender_id, "friend_request_rejected", {
+                "user_id": user.user_id,
+                "username": user.get("username"),
+            })
 
             return {
                 "status_code":  200,
@@ -561,11 +594,11 @@ class UserAPI:
 
     def block_user(self):
         @self.app.post("/me/block_user", tags=["Blocked Users"], description="Block a user.")
-        def root(data: FriendRequestDatas, authorization: str = Header(None)):
+        async def root(data: FriendRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
 
             relationship_blocked = self.app.relationships_cache.cache[user.user_id]["blocked"]
-            
+
             if data.friend_id not in self.app.users_cache.cache:
                 return {
                     "status_code": 404,
@@ -580,6 +613,10 @@ class UserAPI:
 
             relationship_blocked.block_user(data.friend_id)
 
+            await self.app.websocket_manager.emit_to_user(data.friend_id, "user_blocked", {
+                "user_id": user.user_id,
+            })
+
             return {
                 "status_code": 200,
                 "message": "User blocked.",
@@ -589,7 +626,7 @@ class UserAPI:
 
     def unblock_user(self):
         @self.app.delete("/me/unblock_user", tags=["Blocked Users"], description="Unblock a user.")
-        def root(data:  FriendRequestDatas, authorization: str = Header(None)):
+        async def root(data:  FriendRequestDatas, authorization: str = Header(None)):
             user = self.__get_user_from_token(authorization)
 
             relationship_blocked = self.app.relationships_cache.cache[user.user_id]["blocked"]
@@ -601,6 +638,10 @@ class UserAPI:
                 }
 
             relationship_blocked.unblock_user(data.friend_id)
+
+            await self.app.websocket_manager.emit_to_user(data.friend_id, "user_unblocked", {
+                "user_id": user.user_id,
+            })
 
             return {
                 "status_code": 200,
