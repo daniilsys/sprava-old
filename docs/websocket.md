@@ -290,4 +290,4 @@ Le passage de WebSocket natif a Socket.IO apporte :
 - **Reconnexion automatique** cote client
 - **Fallback polling** si WebSocket n'est pas disponible
 - **Events nommes** au lieu du dispatch JSON manuel par `type`
-- **Authentification structuree** via le parametre `auth` au lieu du token dans l'URL
+- **Authentification structurée** via le parametre `auth` au lieu du token dans l'URL
