@@ -41,6 +41,11 @@ class ConversationsCache:
             conn.close()
 
 
+    def add_user(self, user_id):
+        if user_id not in self.cache:
+            self.cache[user_id] = ConversationManager(user_id, self)
+
+
 class ConversationManager:
     def __init__(self, user_id, cache):
         self.user_id = user_id

@@ -80,6 +80,13 @@ class RelationshipsCache:
             cursor.close()
             conn.close()
 
+    def add_user(self, user_id):
+        if user_id not in self.cache:
+            self.cache[user_id] = {
+                "friends": FriendsManager(user_id, self),
+                "requests": FriendRequestsManager(user_id, self),
+                "blocked": BlockedUsersManager(user_id, self)
+            }
 
 
 class FriendsManager: 
