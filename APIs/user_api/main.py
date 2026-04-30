@@ -470,6 +470,13 @@ class UserAPI:
                     "message": "You are already friends with this user."
                 }
 
+            if (self.app.relationships_cache.are_blocked(user.user_id, data.receiver_id) or
+                    self.app.relationships_cache.are_blocked(data.receiver_id, user.user_id)):
+                return {
+                    "status_code": 403,
+                    "message": "You cannot send a friend request to this user."
+                }
+
             relationship.send_request(data.receiver_id)
 
             await self.app.websocket_manager.emit_to_user(data.receiver_id, "new_friend_request", {
@@ -533,6 +540,13 @@ class UserAPI:
                 return {
                     "status_code": 404,
                     "message": "No pending friend request exists between these users."
+                }
+
+            if (self.app.relationships_cache.are_blocked(user.user_id, data.sender_id) or
+                    self.app.relationships_cache.are_blocked(data.sender_id, user.user_id)):
+                return {
+                    "status_code": 403,
+                    "message": "You cannot accept this friend request."
                 }
 
             relationship_requests.accept_request(data.sender_id)
