@@ -3,11 +3,7 @@ import socketio
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=[
-        "https://sprava.top",
-        "https://app.sprava.top",
-        "http://localhost:3000",
-    ],
+    cors_allowed_origins="*",
     ping_interval=20,
     ping_timeout=5,
 )
