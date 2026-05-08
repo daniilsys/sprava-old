@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class WebSocketHandlers:
@@ -15,14 +15,16 @@ class WebSocketHandlers:
             return
 
         conversation_manager = self.app.conversations_cache.cache[sender_id]
-        message_id = conversation_manager.send_message_with_receiver(receiver_id, content)
+        conversation_id = conversation_manager.get_or_create_conversation(receiver_id)
+        message_id = conversation_manager.send_message(conversation_id, content)
 
         message_data = {
+            "conversation_id": conversation_id,
             "message_id": message_id,
             "sender_id": sender_id,
-            "receiver_id": receiver_id,
             "content": content,
-            "timestamp": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "media_ids": [],
         }
 
         await self.manager.emit_to_conversation("new_message", message_data, sender_id, receiver_id)
