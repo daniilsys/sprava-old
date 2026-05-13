@@ -263,6 +263,7 @@ class UserAPI:
                 "user_id": user.user_id,
                 "new_username": username
             }
+        
     def change_password(self):
         @self.app.post("/me/change_password", tags=["User Info"], description="Change your password.")
         def root(data: UserUpdateDatas, authorization: str = Header(None)):
