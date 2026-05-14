@@ -12,9 +12,7 @@ sio = socketio.AsyncServer(
 class ConnectionManager:
     def __init__(self):
         self.sio = sio
-        # user_id -> set of sid (kept for is_user_online / get_online_users only)
         self.user_connections = {}
-        # sid -> user_id
         self.sid_to_user = {}
 
     def register(self, sid, user_id):
