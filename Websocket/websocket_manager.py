@@ -22,8 +22,6 @@ class ConnectionManager:
         if user_id not in self.user_connections:
             self.user_connections[user_id] = set()
         self.user_connections[user_id].add(sid)
-        # Join a per-user room so emit_to_user can delegate to socket.io
-        self.sio.enter_room(sid, f"user_{user_id}")
 
     def unregister(self, sid):
         user_id = self.sid_to_user.pop(sid, None)
@@ -31,14 +29,15 @@ class ConnectionManager:
             self.user_connections[user_id].discard(sid)
             if not self.user_connections[user_id]:
                 del self.user_connections[user_id]
-        # socket.io removes the sid from all rooms automatically on disconnect
         return user_id
 
     def get_user_id(self, sid):
         return self.sid_to_user.get(sid)
 
     async def emit_to_user(self, user_id: int, event: str, data: dict):
-        await self.sio.emit(event, data, room=f"user_{user_id}")
+        sids = self.user_connections.get(user_id, set())
+        for sid in list(sids):
+            await self.sio.emit(event, data, to=sid)
 
     async def emit_to_multiple(self, user_ids: list, event: str, data: dict, exclude_user_id: int = None):
         for user_id in user_ids:
