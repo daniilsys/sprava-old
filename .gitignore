@@ -3,3 +3,6 @@ __pycache__
 .DS_Store
 media/avatars/*
 media/uploads/*
+.env
+/tmp/containers.json
+/tmp/public-endpoint.json
